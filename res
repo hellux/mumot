@@ -20,3 +20,6 @@ https://drewdevault.com/2017/06/10/Introduction-to-Wayland.html
 
 # jan newmarch's document on building clients
 https://jan.newmarch.name/Wayland/index.html
+
+# jasper st pierre's xdg-shell 2014 overview
+http://blog.mecheye.net/2014/06/xdg-shell/
