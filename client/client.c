@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "wl_client.h"
+#include "wayland_client.h"
 
 struct wl_display *display = NULL;
 struct wl_compositor *compositor = NULL;
