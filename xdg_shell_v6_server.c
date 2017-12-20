@@ -1,4 +1,4 @@
-#include "xdg_shell_unstable_v6_server.h"
+#include "xdg_shell_v6_server.h"
 
 /* Below functions are documented in xdg-shell-unstable-v6.xml protocol
  * file. */
