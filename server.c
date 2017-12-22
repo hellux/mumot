@@ -16,8 +16,13 @@ struct compositor *compositor_create() {
     return comp;
 }
 
+void *compositor_destroy(struct compositor *comp) {
+    free(comp);
+}
+
 static void compositor_create_surface(struct wl_client *client,
-                           struct wl_resource *resource, uint32_t id)
+                                      struct wl_resource *resource,
+                                      uint32_t id)
 {
     struct compositor *comp = wl_resource_get_user_data(resource);
     printf("create surface for id %d\n", id);
@@ -35,12 +40,12 @@ static void compositor_create_surface(struct wl_client *client,
 static void compositor_create_region(struct wl_client *client,
                           struct wl_resource *resource, uint32_t id)
 {
+    // TODO create_region
     printf("create region for id %d\n", id);
 }
 
 static void output_release(struct wl_client *client,
                            struct wl_resource *resource) {
-    printf("release output\n");
     wl_resource_destroy(resource);
 }
 
@@ -99,19 +104,30 @@ void bind_functions(struct wl_display *display, struct compositor *comp)
 
 int run_server(struct compositor_handlers *handlers)
 {
+    int ret = 255;
     struct compositor *comp = compositor_create();
     struct wl_display *display;
     struct wl_event_loop *event_loop;
 
     display = wl_display_create();
-    event_loop = wl_display_get_event_loop(display);
     const char *socket = wl_display_add_socket_auto(display);
+
+    if (socket == NULL) {
+        fprintf(stderr, 
+                "could not add socket, maybe too many compositors running\n");
+        ret = EXIT_FAILURE;
+        goto free0;
+    }
+
+    event_loop = wl_display_get_event_loop(display);
     bind_functions(display, comp);
     wl_display_init_shm(display);
 
-    printf("display server on socket %d\n", *socket);
-
     wl_display_run(display);
+    ret = EXIT_SUCCESS;
+free0:
+    wl_display_destroy(display);
+    compositor_destroy(comp);
 
-    return EXIT_SUCCESS;
+    return ret;
 }
