@@ -1,4 +1,4 @@
-#include "server.h"
+#include "wlr_server.h"
 
 int main(int argc, char* args[])
 {

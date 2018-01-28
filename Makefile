@@ -7,11 +7,10 @@ WL_XDG_SHELL_SERVER_H = xdg_shell_v6_server.h
 WL_XDG_SHELL_C = xdg_shell_v6.c
 
 WL_SRC = ${WL_C} ${WL_XDG_SHELL_C}
-SERVER_SRC = mumot.c server.c xdg_shell_v6_server.c
+SERVER_SRC = mumot.c wlr_server.c
 
 server: ${SERVER_SRC}
-	make protocols
-	cc ${WL_SRC} ${SERVER_SRC} -lwayland-server -o mumot
+	tcc ${SERVER_SRC} -lwayland-server -lwlroots -o mumot
 
 protocols:
 	wayland-scanner server-header ${WL_PROTOCOL} ${WL_SERVER_H}
