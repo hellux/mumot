@@ -2,9 +2,16 @@
 #include <wlr/render.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
+#include <wlr/types/wlr_output.h>
 #include "xdg_shell.h"
 
 #include "desktop.h"
+
+void handle_output_add(struct wl_listener *listener, void *data)
+{
+    struct wlr_output *output = data;
+    printf("output added: %s\n", output->name);
+}
 
 struct mum_desktop *desktop_create(struct wl_display *display,
                                    struct wlr_renderer *renderer)
@@ -31,6 +38,8 @@ struct mum_desktop *desktop_create(struct wl_display *display,
     wl_signal_add(&desktop->xdg_shell->events.new_surface,
                   &desktop->xdg_shell_listener);
     desktop->xdg_shell_listener.notify = handle_xdg_shell_surface;
+
+    desktop->output_add_listener.notify = handle_output_add;
 
     return desktop;
 

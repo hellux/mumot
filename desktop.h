@@ -5,6 +5,7 @@ struct mum_desktop {
     struct wlr_xdg_shell_v6 *xdg_shell;
 
     struct wl_listener xdg_shell_listener;
+    struct wl_listener output_add_listener;
 };
 
 struct mum_desktop *desktop_create(struct wl_display *display,

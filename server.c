@@ -56,16 +56,14 @@ fail:
     return NULL;
 }
 
-void server_destroy(struct mum_server *server) {
+void server_destroy(struct mum_server *server)
+{
     if (server) {
         desktop_destroy(server->desktop);
 
         wl_display_destroy(server->display);
-        wl_event_loop_destroy(server->event_loop);
 
         wlr_renderer_destroy(server->renderer);
-        wlr_backend_destroy(server->backend);
-        wlr_data_device_manager_destroy(server->data_device_manager);
     }
     free(server);
 }
