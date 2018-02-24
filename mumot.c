@@ -11,8 +11,12 @@
 #include <wlr/types/wlr_compositor.h>
 
 struct monitor {
-    struct wl_list surfaces;
     struct wlr_output* output;
+
+    struct wl_list surfaces;
+
+    struct wl_listener frame_listener;
+    struct wl_listener destroy_listener;
 
     struct monitor *next;
 };
@@ -24,20 +28,48 @@ struct wl_event_loop *event_loop;
 
 struct wlr_backend *backend;
 struct wlr_renderer *renderer;
-struct wlr_data_device_manager_create *data_device_manager;
+struct wlr_data_device_manager *data_device_manager;
 struct wlr_compositor *compositor;
 struct wlr_xdg_shell_v6 *xdg_shell;
 
 struct wl_listener xdg_shell_listener;
-struct wl_listener output_add_listener;
+struct wl_listener new_output_listener;
+
+void handle_output_destroy(struct wl_listener *listener, void *data)
+{
+    struct monitor *mon = wl_container_of(listener, mon, destroy_listener);
+    /* TODO */
+}
+
+void handle_output_frame(struct wl_listener *listener, void *data)
+{
+    printf("handle frame\n");
+    struct wlr_output *output = data;
+    struct monitor *mon = wl_container_of(listener, mon, frame_listener);
+
+    wlr_output_make_current(output, NULL);
+
+    wlr_renderer_begin(renderer, output);
+    float color[4] = {0, 1.0, 1.0, 1.0};
+    wlr_renderer_clear(renderer, &color);
+    wlr_output_swap_buffers(output, NULL, NULL);
+    wlr_renderer_end(renderer);
+}
 
 void handle_output_add(struct wl_listener *listener, void *data)
 {
     struct wlr_output *output = data;
 
+    if (!wl_list_empty(&output->modes)) {
+        struct wlr_output_mode *mode = wl_container_of(output->modes.prev,
+                                                       mode, link);
+        wlr_output_set_mode(output, mode);
+    }
+
     struct monitor *mon = malloc(sizeof(*mon));
-    mon->output = output;
     wl_list_init(&mon->surfaces);
+    mon->output = output;
+    mon->next = NULL;
 
     if (monitors) {
         struct monitor *m = monitors;
@@ -47,6 +79,11 @@ void handle_output_add(struct wl_listener *listener, void *data)
     } else {
         monitors = mon;
     }
+
+    wl_signal_add(&output->events.destroy, &mon->destroy_listener);
+    mon->destroy_listener.notify = handle_output_destroy;
+    wl_signal_add(&output->events.frame, &mon->frame_listener);
+    mon->frame_listener.notify = handle_output_frame;
 
     printf("output added: %s\n", output->name);
 }
@@ -75,7 +112,7 @@ void cleanup(void)
     }
 }
 
-void init_server(void)
+void init(void)
 {
     assert(display = wl_display_create());
     assert(event_loop = wl_display_get_event_loop(display));
@@ -102,8 +139,6 @@ void init_server(void)
         goto fail;
     }
 
-    monitors = NULL;
-
     compositor = wlr_compositor_create(display, renderer);
     if (!compositor) {
         fprintf(stderr, "failed to create compositor\n");
@@ -116,22 +151,24 @@ void init_server(void)
         goto fail;
     }
 
-    wl_signal_add(&xdg_shell->events.new_surface,
-                  &xdg_shell_listener);
+    wl_signal_add(&xdg_shell->events.new_surface, &xdg_shell_listener);
     xdg_shell_listener.notify = handle_xdg_shell_surface;
-    output_add_listener.notify = handle_output_add;
+
+    wl_signal_add(&backend->events.new_output, &new_output_listener);
+    new_output_listener.notify = handle_output_add;
+
+    monitors = NULL;
 
     return;
 
 fail:
-    fflush(stdout);
     cleanup();
     exit(1);
 }
 
 int main(int argc, char *argv[])
 {
-    init_server();
+    init();
     wl_display_run(display);
     cleanup();
 
