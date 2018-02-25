@@ -32,18 +32,30 @@ struct wlr_data_device_manager *data_device_manager;
 struct wlr_compositor *compositor;
 struct wlr_xdg_shell_v6 *xdg_shell;
 
-struct wl_listener xdg_shell_listener;
 struct wl_listener new_output_listener;
+struct wl_listener xdg_shell_listener;
 
 void handle_output_destroy(struct wl_listener *listener, void *data)
 {
     struct monitor *mon = wl_container_of(listener, mon, destroy_listener);
-    /* TODO */
+
+    wl_list_remove(&mon->frame_listener.link);
+    wl_list_remove(&mon->destroy_listener.link);
+
+    if (monitors == mon) {
+        monitors = mon->next;
+    } else {
+        struct monitor *before = monitors;
+        while (before->next != mon)
+            before = before->next;
+        before->next = mon->next;
+    }
+
+    free(mon);
 }
 
 void handle_output_frame(struct wl_listener *listener, void *data)
 {
-    printf("handle frame\n");
     struct wlr_output *output = data;
     struct monitor *mon = wl_container_of(listener, mon, frame_listener);
 
@@ -80,10 +92,11 @@ void handle_output_add(struct wl_listener *listener, void *data)
         monitors = mon;
     }
 
-    wl_signal_add(&output->events.destroy, &mon->destroy_listener);
     mon->destroy_listener.notify = handle_output_destroy;
-    wl_signal_add(&output->events.frame, &mon->frame_listener);
+    wl_signal_add(&mon->output->events.destroy, &mon->destroy_listener);
+
     mon->frame_listener.notify = handle_output_frame;
+    wl_signal_add(&mon->output->events.frame, &mon->frame_listener);
 
     printf("output added: %s\n", output->name);
 }
@@ -114,8 +127,10 @@ void cleanup(void)
 
 void init(void)
 {
-    assert(display = wl_display_create());
-    assert(event_loop = wl_display_get_event_loop(display));
+    monitors = NULL;
+
+    display = wl_display_create();
+    event_loop = wl_display_get_event_loop(display);
 
     backend = wlr_backend_autocreate(display);
     if (!backend) {
@@ -134,6 +149,9 @@ void init(void)
         goto fail;
     }
 
+    new_output_listener.notify = handle_output_add;
+    wl_signal_add(&backend->events.new_output, &new_output_listener);
+
     if (!wlr_backend_start(backend)) {
         fprintf(stderr, "could not start backend\n");
         goto fail;
@@ -151,13 +169,8 @@ void init(void)
         goto fail;
     }
 
-    wl_signal_add(&xdg_shell->events.new_surface, &xdg_shell_listener);
     xdg_shell_listener.notify = handle_xdg_shell_surface;
-
-    wl_signal_add(&backend->events.new_output, &new_output_listener);
-    new_output_listener.notify = handle_output_add;
-
-    monitors = NULL;
+    wl_signal_add(&xdg_shell->events.new_surface, &xdg_shell_listener);
 
     return;
 
