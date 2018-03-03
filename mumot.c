@@ -9,6 +9,8 @@
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_screenshooter.h>
 
 struct monitor {
     struct wlr_output* output;
@@ -18,10 +20,10 @@ struct monitor {
     struct wl_listener frame_listener;
     struct wl_listener destroy_listener;
 
-    struct monitor *next;
+    struct wl_list link; /* monitors */
 };
 
-struct monitor *monitors;
+struct wl_list monitors; /* monitor.link */
 
 struct wl_display *display;
 struct wl_event_loop *event_loop;
@@ -41,15 +43,7 @@ void handle_output_destroy(struct wl_listener *listener, void *data)
 
     wl_list_remove(&mon->frame_listener.link);
     wl_list_remove(&mon->destroy_listener.link);
-
-    if (monitors == mon) {
-        monitors = mon->next;
-    } else {
-        struct monitor *before = monitors;
-        while (before->next != mon)
-            before = before->next;
-        before->next = mon->next;
-    }
+    wl_list_remove(&mon->link);
 
     free(mon);
 }
@@ -64,6 +58,16 @@ void handle_output_frame(struct wl_listener *listener, void *data)
     wlr_renderer_begin(renderer, output);
     float color[4] = {0, 1.0, 1.0, 1.0};
     wlr_renderer_clear(renderer, &color);
+
+    struct wl_resource *res;
+    wl_resource_for_each(res, &compositor->surfaces) {
+        struct wlr_surface *s = wl_resource_get_user_data(res);
+        if (!wlr_surface_has_buffer(s)) {
+            continue;
+        }
+        /* TODO render */
+    }
+
     wlr_output_swap_buffers(output, NULL, NULL);
     wlr_renderer_end(renderer);
 }
@@ -81,22 +85,16 @@ void handle_output_add(struct wl_listener *listener, void *data)
     struct monitor *mon = malloc(sizeof(*mon));
     wl_list_init(&mon->surfaces);
     mon->output = output;
-    mon->next = NULL;
 
-    if (monitors) {
-        struct monitor *m = monitors;
-        while (m->next)
-            m = m->next;
-        m->next = mon;
-    } else {
-        monitors = mon;
-    }
+    wl_list_insert(&monitors, &mon->link);
 
     mon->destroy_listener.notify = handle_output_destroy;
     wl_signal_add(&mon->output->events.destroy, &mon->destroy_listener);
 
     mon->frame_listener.notify = handle_output_frame;
     wl_signal_add(&mon->output->events.frame, &mon->frame_listener);
+
+    wlr_output_create_global(mon->output);
 
     printf("output added: %s\n", output->name);
 }
@@ -115,19 +113,16 @@ void cleanup(void)
     wlr_renderer_destroy(renderer);
     wlr_xdg_shell_v6_destroy(xdg_shell);
 
-    struct monitor* m = monitors;
-    while (m) {
-        wlr_output_destroy(m->output);
-
-        struct monitor* next = m->next;
-        free(m);
-        m = next;
+    while (!wl_list_empty(&monitors)) {
+        struct monitor *mon = wl_container_of(monitors.next, mon, link);
+        wlr_output_destroy(mon);
+        wl_list_remove(&mon->link);
     }
 }
 
 void init(void)
 {
-    monitors = NULL;
+    wl_list_init(&monitors);
 
     display = wl_display_create();
     event_loop = wl_display_get_event_loop(display);
@@ -140,7 +135,6 @@ void init(void)
 
     renderer = wlr_gles2_renderer_create(backend);
     data_device_manager = wlr_data_device_manager_create(display);
-    wl_display_init_shm(display);
 
     const char *socket = wl_display_add_socket_auto(display);
     if (!socket) {
@@ -148,6 +142,7 @@ void init(void)
                 "could not add socket, maybe too many compositors running\n");
         goto fail;
     }
+    setenv("WAYLAND DISPLAY", socket, true);
 
     new_output_listener.notify = handle_output_add;
     wl_signal_add(&backend->events.new_output, &new_output_listener);
@@ -171,6 +166,10 @@ void init(void)
 
     xdg_shell_listener.notify = handle_xdg_shell_surface;
     wl_signal_add(&xdg_shell->events.new_surface, &xdg_shell_listener);
+
+    wl_display_init_shm(display);
+    wlr_screenshooter_create(display);
+    wlr_primary_selection_device_manager_create(display);
 
     return;
 
