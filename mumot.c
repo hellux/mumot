@@ -6,16 +6,31 @@
 #include <wlr/backend.h>
 #include <wlr/render.h>
 #include <wlr/render/gles2.h>
+#include <wlr/render/matrix.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_primary_selection.h>
-#include <wlr/types/wlr_screenshooter.h>
+
+#define WS_COUNT 10
+#define WS_NAME_MAX_LENGTH 128
+
+struct window {
+    struct wlr_xdg_surface_v6 *xsurface;
+
+    struct wl_list link; /* workspace.clients */
+};
+
+struct workspace {
+    struct wl_list windows;
+    char name[WS_NAME_MAX_LENGTH];
+};
 
 struct monitor {
     struct wlr_output* output;
 
-    struct wl_list surfaces;
+    struct workspace *workspaces;
+    int current;
 
     struct wl_listener frame_listener;
     struct wl_listener destroy_listener;
@@ -44,6 +59,7 @@ void handle_output_destroy(struct wl_listener *listener, void *data)
     wl_list_remove(&mon->frame_listener.link);
     wl_list_remove(&mon->destroy_listener.link);
     wl_list_remove(&mon->link);
+    free(mon->workspaces);
 
     free(mon);
 }
@@ -52,6 +68,7 @@ void handle_output_frame(struct wl_listener *listener, void *data)
 {
     struct wlr_output *output = data;
     struct monitor *mon = wl_container_of(listener, mon, frame_listener);
+    struct workspace *ws = &mon->workspaces[mon->current];
 
     wlr_output_make_current(output, NULL);
 
@@ -59,13 +76,29 @@ void handle_output_frame(struct wl_listener *listener, void *data)
     float color[4] = {0, 1.0, 1.0, 1.0};
     wlr_renderer_clear(renderer, &color);
 
-    struct wl_resource *res;
-    wl_resource_for_each(res, &compositor->surfaces) {
-        struct wlr_surface *s = wl_resource_get_user_data(res);
-        if (!wlr_surface_has_buffer(s)) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    struct window *win;
+    wl_list_for_each(win, &ws->windows, link) {
+        struct wlr_xdg_surface_v6 *xsurf = win->xsurface;
+        struct wlr_surface *surf = xsurf->surface;
+
+        if (!wlr_surface_has_buffer(surf)) {
             continue;
         }
-        /* TODO render */
+
+        wlr_xdg_toplevel_v6_set_size(xsurf, output->width, output->height);
+        struct wlr_box render_box = {
+            .x = 0, .y = 0,
+            .width = output->width, .height = output->height
+        };
+        float matrix[16];
+        wlr_matrix_project_box(&matrix, &render_box,
+                               surf->current->transform,
+                               0, &output->transform_matrix);
+        wlr_render_with_matrix(renderer, surf->texture, &matrix, 1.0f);
+        wlr_surface_send_frame_done(surf, &now);
     }
 
     wlr_output_swap_buffers(output, NULL, NULL);
@@ -83,8 +116,14 @@ void handle_output_add(struct wl_listener *listener, void *data)
     }
 
     struct monitor *mon = malloc(sizeof(*mon));
-    wl_list_init(&mon->surfaces);
     mon->output = output;
+    mon->workspaces = calloc(WS_COUNT, sizeof(*mon->workspaces));
+    for (int i = 0; i < WS_COUNT; i++) {
+        struct workspace *ws = &mon->workspaces[i];
+        wl_list_init(&ws->windows);
+        snprintf(ws->name, WS_NAME_MAX_LENGTH, "%d", i+1);
+    }
+    mon->current = 0;
 
     wl_list_insert(&monitors, &mon->link);
 
@@ -95,27 +134,31 @@ void handle_output_add(struct wl_listener *listener, void *data)
     wl_signal_add(&mon->output->events.frame, &mon->frame_listener);
 
     wlr_output_create_global(mon->output);
-
-    printf("output added: %s\n", output->name);
 }
 
 void handle_xdg_shell_surface(struct wl_listener *listener, void *data)
 {
-    struct wlr_xdg_surface_v6 *surface = data;
+    struct wlr_xdg_surface_v6 *xsurf = data;
     
     printf("role: %d, title: %s, app_id: %s\n",
-           surface->role, surface->title, surface->app_id);
+           xsurf->role, xsurf->title, xsurf->app_id);
+
+    struct monitor *mon = wl_container_of(monitors.next, mon, link);
+
+    struct window *win = malloc(sizeof(*win));
+    win->xsurface = xsurf;
+
+    wl_list_insert(&mon->workspaces[mon->current].windows, &win->link);
 }
 
 void cleanup(void)
 {
     wl_display_destroy(display);
     wlr_renderer_destroy(renderer);
-    wlr_xdg_shell_v6_destroy(xdg_shell);
 
     while (!wl_list_empty(&monitors)) {
         struct monitor *mon = wl_container_of(monitors.next, mon, link);
-        wlr_output_destroy(mon);
+        wlr_output_destroy(mon->output);
         wl_list_remove(&mon->link);
     }
 }
@@ -168,7 +211,6 @@ void init(void)
     wl_signal_add(&xdg_shell->events.new_surface, &xdg_shell_listener);
 
     wl_display_init_shm(display);
-    wlr_screenshooter_create(display);
     wlr_primary_selection_device_manager_create(display);
 
     return;
