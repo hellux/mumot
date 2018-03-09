@@ -6,6 +6,7 @@
 #include <wlr/backend.h>
 #include <wlr/render.h>
 #include <wlr/render/gles2.h>
+#include <wlr/render/matrix.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_xdg_shell_v6.h>
 #include <wlr/types/wlr_compositor.h>
@@ -59,13 +60,26 @@ void handle_output_frame(struct wl_listener *listener, void *data)
     float color[4] = {0, 1.0, 1.0, 1.0};
     wlr_renderer_clear(renderer, &color);
 
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
     struct wl_resource *res;
     wl_resource_for_each(res, &compositor->surfaces) {
         struct wlr_surface *s = wl_resource_get_user_data(res);
         if (!wlr_surface_has_buffer(s)) {
             continue;
         }
-        /* TODO render */
+
+        struct wlr_box render_box = {
+            .x = 20, .y = 40,
+            .width = s->current->width, .height = s->current->height
+        };
+        float matrix[16];
+        wlr_matrix_project_box(&matrix, &render_box,
+                               s->current->transform,
+                               0, &output->transform_matrix);
+        wlr_render_with_matrix(renderer, s->texture, &matrix, 1.0f);
+        wlr_surface_send_frame_done(s, &now);
     }
 
     wlr_output_swap_buffers(output, NULL, NULL);
@@ -115,7 +129,7 @@ void cleanup(void)
 
     while (!wl_list_empty(&monitors)) {
         struct monitor *mon = wl_container_of(monitors.next, mon, link);
-        wlr_output_destroy(mon);
+        wlr_output_destroy(mon->output);
         wl_list_remove(&mon->link);
     }
 }
