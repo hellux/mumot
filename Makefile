@@ -1,2 +1,2 @@
 server: mumot.c
-	gcc -g mumot.c -lwayland-server -lwlroots -o mumot
+	tcc -g -Wall mumot.c -lwayland-server -lwlroots -o mumot
