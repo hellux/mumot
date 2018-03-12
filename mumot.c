@@ -12,7 +12,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_server_decoration.h>
 
-#define MON_WS_COUNT 5
+#define MON_WS_COUNT 1
 #define WS_NAME_SIZE 128
 
 struct window {
@@ -28,13 +28,15 @@ struct workspace {
     double master_ratio; /* ratio of horizontal space master will use */
 
     char name[WS_NAME_SIZE];
+
+    struct wl_list link; /* monitor.workspaces */
 };
 
 struct monitor {
     struct wlr_output* output;
 
-    struct workspace workspaces[MON_WS_COUNT];
-    int current;
+    struct wl_list workspaces;
+    struct workspace *current;
 
     struct wl_listener frame_listener;
     struct wl_listener destroy_listener;
@@ -57,6 +59,16 @@ struct wlr_server_decoration_manager *ssd_manager = NULL;
 struct wl_listener new_output_listener;
 struct wl_listener xdg_shell_listener;
 
+void workspace_destroy(struct workspace *ws) {
+    while (!wl_list_empty(&ws->windows)) {
+        struct window *win = wl_container_of(ws->windows.next, win, link);
+        wl_list_remove(&win->link);
+        free(win);
+    }
+
+    free(ws);
+}
+
 void handle_output_destroy(struct wl_listener *listener, void *data)
 {
     struct monitor *mon = wl_container_of(listener, mon, destroy_listener);
@@ -64,6 +76,12 @@ void handle_output_destroy(struct wl_listener *listener, void *data)
     wl_list_remove(&mon->frame_listener.link);
     wl_list_remove(&mon->destroy_listener.link);
     wl_list_remove(&mon->link);
+
+    while (!wl_list_empty(&mon->workspaces)) {
+        struct workspace *ws = wl_container_of(mon->workspaces.next, ws, link);
+        wl_list_remove(&ws->link);
+        workspace_destroy(ws);
+    }
 
     free(mon);
 }
@@ -117,7 +135,7 @@ void handle_output_frame(struct wl_listener *listener, void *data)
 {
     struct wlr_output *output = data;
     struct monitor *mon = wl_container_of(listener, mon, frame_listener);
-    struct workspace *ws = &mon->workspaces[mon->current];
+    struct workspace *ws = mon->current;
 
     wlr_output_make_current(output, NULL);
 
@@ -180,15 +198,20 @@ void handle_output_add(struct wl_listener *listener, void *data)
 
     struct monitor *mon = calloc(1, sizeof(*mon));
     mon->output = output;
+    wl_list_init(&mon->workspaces);
+    struct workspace *ws;
     for (int i = 0; i < MON_WS_COUNT; i++) {
-        struct workspace *ws = &mon->workspaces[i];
+        ws = calloc(1, sizeof(*ws));
         wl_list_init(&ws->windows);
         ws->master_count = 2;
         ws->window_count = 0;
         ws->master_ratio = 0.5;
+
         snprintf(ws->name, WS_NAME_SIZE, "%d", i+1);
+
+        wl_list_insert(&mon->workspaces, &ws->link);
     }
-    mon->current = 0;
+    mon->current = ws;
 
     wl_list_insert(&monitors, &mon->link);
 
@@ -213,7 +236,7 @@ void handle_xdg_shell_surface(struct wl_listener *listener, void *data)
     struct window *win = calloc(1, sizeof(*win));
     win->xsurface = xsurf;
 
-    struct workspace *ws = &mon->workspaces[mon->current];
+    struct workspace *ws = mon->current;
     wl_list_insert(&ws->windows, &win->link);
     ws->window_count++;
 }
